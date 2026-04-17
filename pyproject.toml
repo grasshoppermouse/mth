@@ -1,0 +1,11 @@
+[project]
+name = "mth"
+version = "0.1.0"
+description = "Lemmatize MTH and create a 2D map of word embeddings"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "ipykernel>=7.2.0",
+    "pacmap>=0.9.1",
+    "spacy>=3.8.14",
+]
