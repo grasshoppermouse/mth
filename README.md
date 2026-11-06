@@ -18,7 +18,7 @@ uv sync
 uv run python -m spacy download en_core_web_sm
 ```
 
-Then run the `R` code in `wordcloud.R` (first install any missing packages), which will create the file `wordcloud.pdf`:
+Then render the quarto file `wordcloud.qmd` (first install any missing packages), which will create the file `wordcloud.t2v.pdf`:
 
 ``` r
 source("wordcloud.R")
@@ -33,8 +33,8 @@ source("wordcloud.R")
 * Misc text cleaning included an attempt to "de-hyphenate" words hyphenated at the ends of lines, e.g., "compara-tive".
 * Stop words removed using the `tidytext` package.
 * Some stop words in the `tidytext` package, specifically "man", "men", "group", "groups", "area", and "areas", were *not* removed.
-* Words were [lemmatized](https://en.wikipedia.org/wiki/Lemmatization) using the [spaCy](https://spacy.io) python package.
-* Word embeddings were computed using the GloVe algorithm from the [`text2vec`](https://text2vec.org/glove.html) package.
+* Words were [lemmatized](https://en.wikipedia.org/wiki/Lemmatization) using the [spaCy](https://spacy.io) python package and [udpipe](https://cran.r-project.org/web/packages/udpipe/index.html) `R` package.
+* Word embeddings were computed using the GloVe algorithm from the [`text2vec`](https://text2vec.org/glove.html) and the [`word2vec`](https://cran.r-project.org/web/packages/word2vec/index.html) package.
 * Reduction of the high dimensional word embedding space to 2D for visualization was done with [PaCMAP](https://github.com/YingfanWang/PaCMAP).
 * The wordcloud was plotted using the `ggrepel` package.
 * Neither the `PaCMAP` nor `ggrepel` algorithms are deterministic. A seed was set for reproducibility, but differences in hardware and operating systems can cause differences in the final appearence of the wordcloud.
