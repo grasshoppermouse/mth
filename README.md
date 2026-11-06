@@ -6,7 +6,7 @@
 
 This repo contains the `R` and `python` code to create this wordcloud of the top 200 most frequent words in Man the Hunter (Lee and DeVore, 1968):
 
-![](wordcloud.svg)
+![](wordcloud.t2v.svg)
 
 ## How to use
 

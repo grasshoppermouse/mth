@@ -4,6 +4,5 @@
 .httr-oauth
 .DS_Store
 .quarto
+.positai
 old
-README_files
-*.html
