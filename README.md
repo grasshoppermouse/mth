@@ -18,11 +18,7 @@ uv sync
 uv run python -m spacy download en_core_web_sm
 ```
 
-Then render the quarto file `wordcloud.qmd` (first install any missing packages), which will create the file `wordcloud.t2v.pdf`:
-
-``` r
-source("wordcloud.R")
-```
+Then render the quarto file `wordcloud.qmd` (first install any missing packages), which will create the file `wordcloud.t2v.pdf`.
 
 ## Notes
 
