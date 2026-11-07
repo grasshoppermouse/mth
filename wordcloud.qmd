@@ -21,6 +21,8 @@ library(tidyverse)
 library(tidytext)
 library(textstem)
 library(ggrepel)
+library(ggwordcloud)
+library(ggraph)
 library(hunspell)
 library(text2vec)
 library(word2vec)
@@ -34,7 +36,6 @@ seed <- 3256L
 set.seed(seed)
 
 source("functions.R")
-
 ```
 
 Load the text from the internet or a saved version
@@ -51,6 +52,24 @@ if (!file.exists("man-the-hunter.txt")) {
 } else {
   mth0 <- read_lines("man-the-hunter.txt")
 }
+
+# Remove frontmatter, and references
+preface <- 75
+main_text_start <- 746
+references <- 36991
+mth0 <- mth0[main_text_start:references]
+
+# Remove running titles
+source("running_titles.R") # Character vector of running titles
+mth0 <- map_chr(mth0, \(v) str_squish(v))
+for (running_title in running_titles) {
+  rx <- paste0("^\\d*\\s*", running_title)
+  mth0 <- mth0[!str_detect(mth0, regex(rx, ignore_case = T))]
+}
+
+# # Remove blank lines
+mth0 <- mth0[mth0 != ""]
+# write(mth0, "mth0.txt")
 ```
 
 Stop words:
@@ -85,14 +104,9 @@ stop_words2 <-
 Cleanup:
 
 ```{r}
-# Remove frontmatter, and references
-# and perform some cleanup before tokenizing
-preface <- 75
-main_text_start <- 746
-references <- 36991
-
+# Perform some cleanup before tokenizing
 mth <-
-  mth0[main_text_start:references] |>
+  mth0 |>
   str_replace_all("‘", "'") |>
   str_replace_all("’", "'") |>
   str_replace_all("“", '"') |>
@@ -101,7 +115,9 @@ mth <-
   str_squish() |>
   str_replace_all("- ", "-") |>
 
-  # Remove the volume title, per discussion with Sisk
+  # Remove the volume title, which is mentioned
+  # several times throughout the text, per
+  # discussion with Sisk
   str_replace_all(regex("Man the Hunter", ignore_case = T), "MTH") |>
 
   # Some manual fixes
@@ -168,7 +184,7 @@ lemmas_spacy <-
   clean_lemmas()
 
 # Reconstruct the full text as a single string
-mth_spacy <- str_c(lemmas_spacy$lemma, collapse = " ")
+mth_spacy <- str_flatten(lemmas_spacy$lemma, collapse = " ")
 ```
 
 udpipe lemmas
@@ -189,7 +205,7 @@ lemmas_udpipe <-
   )
 
 # Reconstruct the full text as a single string
-mth_udpipe <- str_c(lemmas_udpipe$lemma, collapse = " ")
+mth_udpipe <- str_flatten(lemmas_udpipe$lemma, collapse = " ")
 ```
 
 Count lemmas
@@ -281,12 +297,68 @@ Top bigrams
 sort(table(lemmas_udpipe$bigram), decreasing = T)[1:50]
 ```
 
+Netword co-occurence
+
+```{r}
+bigram_graph <-
+  lemmas_udpipe |>
+  count(lemma, next_lemma, sort = T) |>
+  dplyr::filter(n >= 15) |>
+  igraph::graph_from_data_frame()
+
+plot_graph <-
+  ggraph(bigram_graph, layout = "fr") +
+  # Edge width matches bigram frequency.
+  geom_edge_link(
+    aes(edge_width = n), # edge_alpha = n,
+    edge_alpha = 0.5,
+    show.legend = TRUE,
+    arrow = arrow(length = unit(3, 'mm')), # Shows phrase directionality
+    end_cap = circle(3, 'mm')
+  ) + # Stops arrow hiding under the node text
+
+  # Draw the nodes (individual words)
+  geom_node_point(color = "skyblue", size = 2) +
+
+  # Overlay readable text labels onto the nodes
+  geom_node_text(
+    aes(label = name),
+    # vjust = 1.5,
+    # hjust = 0.5,
+    check_overlap = F,
+    repel = T,
+    fontface = "bold",
+    size = 4
+  ) +
+  # scale_edge_alpha(name = "Co-occurrence Frequency") +
+  scale_edge_width(range = c(0.5, 2.5)) + # , guide = "none"
+  theme_void() + # Removes axes, ticks, and background grid lines
+  labs(
+    title = "Word Co-occurrence Network Graph",
+    subtitle = "Visualizing bigram relationships and central key terms"
+  )
+plot_graph
+ggsave("networkgraph.pdf")
+```
+
 Top 200 words
 
 ```{r}
 # Top 200 words
 mth200spacy <- mth_words_spacy[1:200, ]
 mth200udpipe <- mth_words_udpipe[1:200, ]
+```
+
+The basic word cloud:
+
+```{r}
+p <-
+  ggplot(mth200udpipe, aes(label = lemma, size = n)) +
+  geom_text_wordcloud_area(rm_outside = F, grid_size = 3, seed = 9741) +
+  scale_size_area(max_size = 30) +
+  theme_minimal()
+p
+ggsave("wordcloud.basic.pdf", p, width = 9, height = 9)
 ```
 
 Word vectors from Wiki Giga 2024. Find vectors of top 200 words from MTH relative to a large corpus of text from Wikipedia and newswire text such as the Associated Press (AP), Agence France-Presse (AFP), The New York Times, and the Xinhua News Agency.
@@ -309,7 +381,7 @@ rm(glove_raw)
 # Vectors for top 200
 # Using spaCy because glove_words does not contain "hunter-gatherer"
 
-wordvec200 <- glove_matrix[mth200spacy$lemma, ]
+wikivec200 <- glove_matrix[mth200spacy$lemma, ]
 rm(glove_matrix)
 ```
 
@@ -320,62 +392,24 @@ import pacmap
 
 reducer = pacmap.PaCMAP(
     n_components=2,  # Coordinates for 2D plotting
-    n_neighbors=15,  # Default is 10; raise slightly for small datasets
+    n_neighbors=None,  # Default is 10; None: auto-selection
     MN_ratio=0.5,  # Mid-near neighbors ratio (default: 0.5)
     FP_ratio=2.0,  # Further-away pairs ratio (default: 2.0)
     lr=1.0,  # Learning rate
     num_iters=450,  # Default is 450 (100 mid, 200 far, 150 local)
     random_state=r.seed,
 )
-embedding = reducer.fit_transform(r.wordvec200)
+embedding = reducer.fit_transform(r.wikivec200)
 ```
 
 Plot
 
 ```{r}
-mth200 <- as_tibble(wordvec200, rownames = "lemma")
+mth200 <- as_tibble(wikivec200, rownames = "lemma")
 mth200$n <- mth200spacy$n
 mth200$e1 <- py$embedding[, 1]
 mth200$e2 <- py$embedding[, 2]
 plot_vectors(mth200, "wordcloud.wiki.pdf")
-```
-
-word2vec embeddings, based only on the text of MTH
-
-```{r}
-# Chunk text for word2vec
-mth_lemmatized <- map_chr(
-  0:903,
-  \(i) str_c(lemmas_udpipe$lemma[(i * 97 + 1):(i * 97 + 97)], collapse = " ")
-)
-# Train a MTH model with word2vec
-mth_w2v <- word2vec(
-  x = mth_lemmatized,
-  type = "skip-gram",
-  dim = 50, # Kept low to match 700k character text scale
-  min_count = 1, # Keeps all compound words intact
-  iter = 25,
-  split = c(" ", ".\n?!")
-)
-
-mth_matrix <- as.matrix(mth_w2v)
-wordvec200 <- mth_matrix[mth200udpipe$lemma, ]
-```
-
-Reduce dimensionality
-
-```{python}
-embedding = reducer.fit_transform(r.wordvec200)
-```
-
-Plot
-
-```{r}
-mth200 <- as_tibble(wordvec200, rownames = "lemma")
-mth200$n <- mth200udpipe$n
-mth200$e1 <- py$embedding[, 1]
-mth200$e2 <- py$embedding[, 2]
-plot_vectors(mth200, "wordcloud.w2v.pdf")
 ```
 
 text2vec
@@ -383,34 +417,34 @@ text2vec
 ```{r}
 # text2vec word embeddings (GlobalVectors)
 it <- itoken(mth_udpipe)
-vocab <- create_vocabulary(lemmas_udpipe$lemma)
-# vocab <- prune_vocabulary(vocab, term_count_min = 5L)
+vocab <- create_vocabulary(it)
+vocab <- prune_vocabulary(vocab, term_count_min = 5L)
 vectorizer <- vocab_vectorizer(vocab)
 # use window of 5 for context words
-tcm <- create_tcm(it, vectorizer, skip_grams_window = 5L)
-glove <- GlobalVectors$new(rank = 50, x_max = 10)
+tcm <- create_tcm(it, vectorizer, skip_grams_window = 8L)
+glove <- GlobalVectors$new(rank = 30, x_max = 5)
 wv_main <- glove$fit_transform(
   tcm,
-  n_iter = 20,
-  convergence_tol = 0.01,
+  n_iter = 100,
+  convergence_tol = 0.001,
   n_threads = 1
 )
 wv_context <- glove$components
 word_vectors <- wv_main + t(wv_context)
 
-wordvec200 <- word_vectors[mth200$lemma, ]
+text2vec200 <- word_vectors[mth200udpipe$lemma, ]
 ```
 
 Reduce dimensionality
 
 ```{python}
-embedding = reducer.fit_transform(r.wordvec200)
+embedding = reducer.fit_transform(r.text2vec200)
 ```
 
 Plot
 
 ```{r}
-mth200 <- as_tibble(wordvec200, rownames = "lemma")
+mth200 <- as_tibble(text2vec200, rownames = "lemma")
 mth200$n <- mth200udpipe$n
 mth200$e1 <- py$embedding[, 1]
 mth200$e2 <- py$embedding[, 2]
