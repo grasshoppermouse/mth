@@ -4,7 +4,7 @@
 <!-- badges: start -->
 <!-- badges: end -->
 
-This repo contains the `R` and `python` code to create this wordcloud of the top 200 most frequent words in Man the Hunter (Lee and DeVore, 1968):
+This repo contains the `R` and `python` code to create a wordcloud and semantic maps of the top 200 most frequent words in Man the Hunter (Lee and DeVore, 1968). Semantic map:
 
 ![](wordcloud.t2v.svg)
 
@@ -18,7 +18,7 @@ uv sync
 uv run python -m spacy download en_core_web_sm
 ```
 
-Then render the quarto file `wordcloud.qmd` (first install any missing packages), which will create the file `wordcloud.t2v.pdf`.
+Then render the quarto file `wordcloud.qmd` (first install any missing packages), which will create the files `wordcloud.basic.pdf` and `wordcloud.t2v.pdf`.
 
 ## Notes
 
@@ -27,10 +27,10 @@ Then render the quarto file `wordcloud.qmd` (first install any missing packages)
 * The text of *Man the Hunter* was obtained from the [Internet Archive](https://archive.org/details/ManTheHunter), and will be downloaded automatically by the `R` script.
 * The text contains misc errors, presumably due to errors in converting the original to text.
 * Misc text cleaning included an attempt to "de-hyphenate" words hyphenated at the ends of lines, e.g., "compara-tive".
-* Stop words removed using the `tidytext` package.
+* Stop words removed using the `tidytext` package, but without the onix stop words.
 * Some stop words in the `tidytext` package, specifically "man", "men", "group", "groups", "area", and "areas", were *not* removed.
 * Words were [lemmatized](https://en.wikipedia.org/wiki/Lemmatization) using the [spaCy](https://spacy.io) python package and [udpipe](https://cran.r-project.org/web/packages/udpipe/index.html) `R` package.
-* Word embeddings were computed using the GloVe algorithm from the [`text2vec`](https://text2vec.org/glove.html) and the [`word2vec`](https://cran.r-project.org/web/packages/word2vec/index.html) package.
+* Word embeddings were computed using the GloVe algorithm from the [`text2vec`](https://text2vec.org/glove.html) package.
 * Reduction of the high dimensional word embedding space to 2D for visualization was done with [PaCMAP](https://github.com/YingfanWang/PaCMAP).
-* The wordcloud was plotted using the `ggrepel` package.
+* The wordcloud and semantic maps were plotted using the `ggwordcloud` and `ggrepel` packages.
 * Neither the `PaCMAP` nor `ggrepel` algorithms are deterministic. A seed was set for reproducibility, but differences in hardware and operating systems can cause differences in the final appearence of the wordcloud.
