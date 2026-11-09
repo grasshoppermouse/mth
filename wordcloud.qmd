@@ -115,9 +115,8 @@ mth <-
   str_squish() |>
   str_replace_all("- ", "-") |>
 
-  # Remove the volume title, which is mentioned
-  # several times throughout the text, per
-  # discussion with Sisk
+  # Remove the volume title, mentioned throughout
+  # the text, per discussion with Sisk
   str_replace_all(regex("Man the Hunter", ignore_case = T), "MTH") |>
 
   # Some manual fixes
@@ -129,6 +128,10 @@ mth <-
   str_replace_all("IKung", "!Kung") |>
   str_replace_all("Turn-bull", "Turnbull") |>
   str_replace_all("Wood-burn", "Woodburn") |>
+  str_replace_all(
+    regex("hunters and gatherers", ignore_case = T),
+    "hunter-gatherer"
+  ) |>
 
   str_split_1(" ")
 ```
@@ -150,7 +153,7 @@ mth[!isaword & ishyphenated] <- str_remove(mth[!isaword & ishyphenated], "-")
 
 # Cleaned up text
 mth_clean <- str_flatten(mth, collapse = " ")
-# write(mth_clean, "mth_clean.txt")
+write(mth_clean, "mth_clean.txt")
 mth_clean_length <- str_count(mth_clean) + 10
 ```
 
@@ -338,7 +341,7 @@ plot_graph <-
     subtitle = "Visualizing bigram relationships and central key terms"
   )
 plot_graph
-ggsave("networkgraph.pdf")
+ggsave("networkgraph.pdf", plot_graph)
 ```
 
 Top 200 words
@@ -420,7 +423,7 @@ it <- itoken(mth_udpipe)
 vocab <- create_vocabulary(it)
 vocab <- prune_vocabulary(vocab, term_count_min = 5L)
 vectorizer <- vocab_vectorizer(vocab)
-# use window of 5 for context words
+# use window of 5-10 for context words
 tcm <- create_tcm(it, vectorizer, skip_grams_window = 8L)
 glove <- GlobalVectors$new(rank = 30, x_max = 5)
 wv_main <- glove$fit_transform(
@@ -449,22 +452,4 @@ mth200$n <- mth200udpipe$n
 mth200$e1 <- py$embedding[, 1]
 mth200$e2 <- py$embedding[, 2]
 plot_vectors(mth200, "wordcloud.t2v.pdf")
-```
-
-Preliminary analysis of gendered words (not done!)
-
-```{r}
-gender <- fromJSON(
-  "https://raw.githubusercontent.com/ecmonsen/gendered_words/refs/heads/master/gendered_words.json"
-)
-
-e <- left_join(
-  mth_words_udpipe,
-  gender[c("word", "gender")],
-  by = c("lemma" = "word")
-) |>
-  unique() # some words in gender are repeated
-
-table(e$gender, useNA = 'a')
-e |> summarise(total = sum(n), .by = gender)
 ```

@@ -71,6 +71,7 @@ clean_lemmas <- function(lemmas) {
         lemma == "ty" ~ "tie", # udpipe: ties -> ty
         lemma == "eating" ~ "eat",
         lemma == "numb" ~ "number",
+        lemma == "fishing" ~ "fish", # match Sisk
         .default = lemma
       ),
     ) |>
@@ -87,7 +88,7 @@ clean_lemmas <- function(lemmas) {
 # Function to plot word vectors
 plot_vectors <- function(d, fn, ggrepel = T) {
   p <-
-    ggplot(mth200, aes(e1, e2, label = lemma, size = n)) +
+    ggplot(d, aes(e1, e2, label = lemma, size = n)) +
     geom_point(alpha = 0.1) +
     scale_size_area(max_size = 10, transform = 'identity') +
     coord_fixed() +
