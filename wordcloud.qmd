@@ -99,7 +99,7 @@ mth0 <-
 source("running_titles.R") # Character vector of running titles
 
 for (running_title in running_titles) {
-  rx <- paste0("^\\d*\\s*", running_title, "\\d*\\s*\n")
+  rx <- paste0("^\\d*\\s*", running_title)
   mth0 <- mth0[!str_detect(mth0, regex(rx, ignore_case = T))]
 }
 
