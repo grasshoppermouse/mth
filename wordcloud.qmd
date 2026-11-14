@@ -25,7 +25,7 @@ library(ggwordcloud)
 library(ggraph)
 library(hunspell)
 library(text2vec)
-library(word2vec)
+# library(word2vec)
 library(reticulate)
 library(udpipe)
 library(data.table)
@@ -36,40 +36,6 @@ seed <- 3256L
 set.seed(seed)
 
 source("functions.R")
-```
-
-Load the text from the internet or a saved version
-
-```{r}
-# Get text version of MTH from Internet Archive
-# Different formats: https://archive.org/download/ManTheHunter
-
-if (!file.exists("man-the-hunter.txt")) {
-  mth0 <- read_lines(
-    "https://archive.org/download/ManTheHunter/Man%20the%20Hunter_djvu.txt"
-  )
-  write_lines(mth0, file = "man-the-hunter.txt")
-} else {
-  mth0 <- read_lines("man-the-hunter.txt")
-}
-
-# Remove frontmatter, and references
-preface <- 75
-main_text_start <- 746
-references <- 36991
-mth0 <- mth0[main_text_start:references]
-
-# Remove running titles
-source("running_titles.R") # Character vector of running titles
-mth0 <- map_chr(mth0, \(v) str_squish(v))
-for (running_title in running_titles) {
-  rx <- paste0("^\\d*\\s*", running_title)
-  mth0 <- mth0[!str_detect(mth0, regex(rx, ignore_case = T))]
-}
-
-# # Remove blank lines
-mth0 <- mth0[mth0 != ""]
-# write(mth0, "mth0.txt")
 ```
 
 Stop words:
@@ -101,23 +67,51 @@ stop_words2 <-
   add_row(word = c("pp", "set", "call"), lexicon = "Added") # add new stop words
 ```
 
-Cleanup:
+Load the text from the internet or a saved version, tokenize and lemmatize
 
 ```{r}
-# Perform some cleanup before tokenizing
-mth <-
-  mth0 |>
-  str_replace_all("‘", "'") |>
-  str_replace_all("’", "'") |>
-  str_replace_all("“", '"') |>
-  str_replace_all("”", '"') |>
-  str_flatten(collapse = " ") |>
-  str_squish() |>
-  str_replace_all("- ", "-") |>
+# Get text version of MTH from Internet Archive
+# Different formats: https://archive.org/download/ManTheHunter
 
+if (!file.exists("man-the-hunter.txt")) {
+  mth_raw <- read_lines(
+    "https://archive.org/download/ManTheHunter/Man%20the%20Hunter_djvu.txt"
+  )
+  write_lines(mth_raw, file = "man-the-hunter.txt")
+} else {
+  mth_raw <- read_lines("man-the-hunter.txt")
+}
+
+# Remove frontmatter, and references
+preface <- 75
+main_text_start <- 746
+references <- 36991
+mth0 <-
+  mth_raw[main_text_start:references] |>
+  str_replace_all("‘|’", "'") |>
+  str_replace_all("“|”", '"') |>
+  str_squish() |>
   # Remove the volume title, mentioned throughout
   # the text, per discussion with Sisk
-  str_replace_all(regex("Man the Hunter", ignore_case = T), "MTH") |>
+  str_replace_all(regex("Man the Hunter", ignore_case = T), "MTH")
+
+# Remove running titles for the same reason
+source("running_titles.R") # Character vector of running titles
+
+for (running_title in running_titles) {
+  rx <- paste0("^\\d*\\s*", running_title, "\\d*\\s*\n")
+  mth0 <- mth0[!str_detect(mth0, regex(rx, ignore_case = T))]
+}
+
+# Try to fix words hyphenated
+# at the end of lines
+mth <-
+  str_flatten(mth0, " ") |>
+  str_squish() |>
+  str_replace_all("- ", "-") |>
+  str_split_1(" ") |>
+  dehyphenate() |>
+  str_flatten(" ") |>
 
   # Some manual fixes
   str_replace_all("ofarcheological", "of archeological") |>
@@ -128,87 +122,88 @@ mth <-
   str_replace_all("IKung", "!Kung") |>
   str_replace_all("Turn-bull", "Turnbull") |>
   str_replace_all("Wood-burn", "Woodburn") |>
+  str_replace_all("Wash-burn", "Washburn") |>
   str_replace_all(
     regex("hunters and gatherers", ignore_case = T),
     "hunter-gatherer"
-  ) |>
+  )
 
-  str_split_1(" ")
-```
-
-De-hyphenate when needed, and re-join text
-
-```{r}
-# Try to un-hyphenate words hyphenated at the
-# end of a line but keeping hyphens in hyphenated compound words
-
-# If the de-hyphenated version is a word, then de-hyphenate
-dehyphenatedisword <- hunspell_check(str_remove_all(mth, "[:punct:]"))
-mth[dehyphenatedisword] <- str_remove_all(mth[dehyphenatedisword], "-")
-
-# Otherwise, if the hyphenated word isn't a word then de-hyphenate and hope for the best
-isaword <- hunspell_check(str_remove_all(mth, "[^[:alnum:]-]"))
-ishyphenated <- str_detect(mth, "-")
-mth[!isaword & ishyphenated] <- str_remove(mth[!isaword & ishyphenated], "-")
-
-# Cleaned up text
-mth_clean <- str_flatten(mth, collapse = " ")
-write(mth_clean, "mth_clean.txt")
-mth_clean_length <- str_count(mth_clean) + 10
+# Tokenizer and lemmatizer using a model that retains hyphenated words
+ud_model <- udpipe_load_model(file = "english-gum-ud-2.5-191206.udpipe")
+out_udpipe <- udpipe(mth, ud_model)
 ```
 
 Check if any common stop words are important and should be removed from the stopword list
 
 ```{r}
-mth_lower <- str_to_lower(mth)
-mth_stopwords <- mth_lower[mth_lower %in% stop_words2$word]
-sort(table(mth_stopwords), decreasing = T)[1:150]
+sort(
+  table(out_udpipe$lemma[out_udpipe$lemma %in% stop_words2$word]),
+  decreasing = T
+)[1:150]
 ```
+
+Remove stopwords
+
+```{r}
+lemmas_udpipe0 <-
+  out_udpipe |>
+  rename(word = token, pos = upos) |>
+  mutate(lemma = str_to_lower(lemma)) |>
+  anti_join(stop_words2, by = join_by(lemma == word))
+```
+
+Top hyphenated words
+
+```{r}
+lemmas_udpipe0 |>
+  dplyr::filter(str_detect(lemma, "-")) |>
+  summarise(N = n(), .by = lemma) |>
+  arrange(desc(N)) |>
+  dplyr::filter(N >= 5)
+```
+
+Modify the `clean_lemmas` function to aggregate a few of these and then create bigrams
+
+```{r}
+lemmas_udpipe <-
+  lemmas_udpipe0 |>
+  clean_lemmas() |> # See functions.R
+  mutate(
+    next_lemma = txt_next(lemma),
+    bigram = paste(lemma, next_lemma)
+  )
+```
+
+```{r}
+# Cleaned up text
+write(mth, "mth_clean.txt")
+mth_length <- str_count(mth) + 10
+```
+
+Lemmas from spaCy using the cleaned up text `mth`
 
 ```{python}
 import spacy
 
 spacy.util.fix_random_seed(r.seed)
 nlp = spacy.load("en_core_web_sm")
-nlp.max_length = r.mth_clean_length
-doc = nlp(r.mth_clean)
+nlp.max_length = r.mth_length
+doc = nlp(r.mth)
 ```
-
-Lemmas from spaCy
 
 ```{r}
 doc2 <- iterate(py$doc)
 lemmas_spacy <-
   tibble(
     word = map_chr(doc2, \(token) token$text),
-    lemma = map_chr(doc2, \(token) token$lemma_),
+    lemma = map_chr(doc2, \(token) str_to_lower(token$lemma_)),
     pos = map_chr(doc2, \(token) token$pos_)
   ) |>
+  anti_join(stop_words2, by = join_by(lemma == word)) |>
   clean_lemmas()
 
 # Reconstruct the full text as a single string
 mth_spacy <- str_flatten(lemmas_spacy$lemma, collapse = " ")
-```
-
-udpipe lemmas
-
-```{r}
-# udpipe lemmatization that retains hyphenated compound words
-# dl <- udpipe_download_model(language = "english")
-# dl_gum <- udpipe_download_model(language = "english-gum")
-ud_model <- udpipe_load_model(file = "english-gum-ud-2.5-191206.udpipe")
-lemmas_udpipe <-
-  udpipe_annotate(ud_model, x = mth_clean) |>
-  as.data.frame() |>
-  rename(word = token, pos = upos) |>
-  clean_lemmas() |> # See functions.R
-  mutate(
-    next_lemma = txt_next(lemma),
-    bigram = paste(lemma, next_lemma)
-  )
-
-# Reconstruct the full text as a single string
-mth_udpipe <- str_flatten(lemmas_udpipe$lemma, collapse = " ")
 ```
 
 Count lemmas
@@ -227,9 +222,11 @@ mth_words_udpipe <-
   summarise(n = n()) |>
   arrange(desc(n))
 
+# See functions.R
 lemmas_sisk <-
   sisk_lemmas(mth0) |>
-  rename(lemma = word, word = word_orig)
+  rename(lemma = word, word = word_orig) |>
+  anti_join(stop_words2, by = join_by(lemma == word))
 
 mth_words_sisk <-
   lemmas_sisk |>
@@ -238,7 +235,7 @@ mth_words_sisk <-
   arrange(desc(n))
 ```
 
-Identifying major discrepancies. "cent" is mostly from "per cent" in the raw text; I unified the spelling of "archaeology", etc.; "brown" is mostly references to Radcliffe-Brown. "cross" mostly appears in the hyphentated "cross-cultural" or "cross-cousin". The Sisk lemmatizer often maps "number" to "numb", and many words to "good". Other discrepancies were addressed by iterating parts of the pipeline many times and making corrections in the `clean_lemmas` function.
+Identifying major discrepancies. "cent" is mostly from "per cent" in the raw text; I unified the spelling of "archaeology", etc.; "brown" is mostly references to Radcliffe-Brown. "cross" mostly appears in the hyphentated "cross-cultural" or "cross-cousin". The udpipe lemmatizer retains "hunter-gatherer" as a single lemma. The Sisk lemmatizer often maps "number" to "numb", and many words to "good". Other discrepancies were addressed by iterating parts of the pipeline many times and making corrections in the `clean_lemmas` function.
 
 ```{r}
 mth_words_combined <-
@@ -300,7 +297,7 @@ Top bigrams
 sort(table(lemmas_udpipe$bigram), decreasing = T)[1:50]
 ```
 
-Netword co-occurence
+Network co-occurence
 
 ```{r}
 bigram_graph <-
@@ -352,7 +349,7 @@ mth200spacy <- mth_words_spacy[1:200, ]
 mth200udpipe <- mth_words_udpipe[1:200, ]
 ```
 
-The basic word cloud:
+The basic word cloud based on udpipe lemmas:
 
 ```{r}
 p <-
@@ -360,9 +357,11 @@ p <-
   geom_text_wordcloud_area(rm_outside = F, grid_size = 3, seed = 9741) +
   scale_size_area(max_size = 30) +
   theme_minimal()
-p
-ggsave("wordcloud.basic.pdf", p, width = 9, height = 9)
+fn <- "wordcloud.basic.svg"
+ggsave(fn, p, width = 9, height = 9)
 ```
+
+![](`{r} fn`)
 
 Word vectors from Wiki Giga 2024. Find vectors of top 200 words from MTH relative to a large corpus of text from Wikipedia and newswire text such as the Associated Press (AP), Agence France-Presse (AFP), The New York Times, and the Xinhua News Agency.
 
@@ -393,8 +392,10 @@ Dimension reduction for plotting
 ```{python}
 import pacmap
 
-reducer = pacmap.PaCMAP(
+reducer1 = pacmap.PaCMAP(
     n_components=2,  # Coordinates for 2D plotting
+    distance="angular",
+    apply_pca=True,
     n_neighbors=None,  # Default is 10; None: auto-selection
     MN_ratio=0.5,  # Mid-near neighbors ratio (default: 0.5)
     FP_ratio=2.0,  # Further-away pairs ratio (default: 2.0)
@@ -402,7 +403,7 @@ reducer = pacmap.PaCMAP(
     num_iters=450,  # Default is 450 (100 mid, 200 far, 150 local)
     random_state=r.seed,
 )
-embedding = reducer.fit_transform(r.wikivec200)
+embedding1 = reducer1.fit_transform(r.wikivec200)
 ```
 
 Plot
@@ -410,16 +411,25 @@ Plot
 ```{r}
 mth200 <- as_tibble(wikivec200, rownames = "lemma")
 mth200$n <- mth200spacy$n
-mth200$e1 <- py$embedding[, 1]
-mth200$e2 <- py$embedding[, 2]
-plot_vectors(mth200, "wordcloud.wiki.pdf")
+mth200$e1 <- py$embedding1[, 1]
+mth200$e2 <- py$embedding1[, 2]
+fn <- "wordcloud.wiki.svg"
+plot_vectors(mth200, fn)
 ```
 
-text2vec
+![](`{r} fn`)
+
+text2vec using udpipe sentences as the documents:
 
 ```{r}
 # text2vec word embeddings (GlobalVectors)
-it <- itoken(mth_udpipe)
+mth_udpipe <-
+  lemmas_udpipe |>
+  summarise(
+    sentence = str_flatten(lemma, " "),
+    .by = sentence_id
+  )
+it <- itoken(mth_udpipe$sentence)
 vocab <- create_vocabulary(it)
 vocab <- prune_vocabulary(vocab, term_count_min = 5L)
 vectorizer <- vocab_vectorizer(vocab)
@@ -441,7 +451,18 @@ text2vec200 <- word_vectors[mth200udpipe$lemma, ]
 Reduce dimensionality
 
 ```{python}
-embedding = reducer.fit_transform(r.text2vec200)
+reducer2 = pacmap.PaCMAP(
+    n_components=2,  # Coordinates for 2D plotting
+    distance="angular",
+    apply_pca=False,
+    n_neighbors=None,  # Default is 10; None: auto-selection
+    MN_ratio=0.5,  # Mid-near neighbors ratio (default: 0.5)
+    FP_ratio=2.0,  # Further-away pairs ratio (default: 2.0)
+    lr=1.0,  # Learning rate
+    num_iters=450,  # Default is 450 (100 mid, 200 far, 150 local)
+    random_state=r.seed,
+)
+embedding2 = reducer2.fit_transform(r.text2vec200)
 ```
 
 Plot
@@ -449,7 +470,10 @@ Plot
 ```{r}
 mth200 <- as_tibble(text2vec200, rownames = "lemma")
 mth200$n <- mth200udpipe$n
-mth200$e1 <- py$embedding[, 1]
-mth200$e2 <- py$embedding[, 2]
-plot_vectors(mth200, "wordcloud.t2v.pdf")
+mth200$e1 <- py$embedding2[, 1]
+mth200$e2 <- py$embedding2[, 2]
+fn <- "wordcloud.t2v.svg"
+plot_vectors(mth200, fn)
 ```
+
+![](`{r} fn`)

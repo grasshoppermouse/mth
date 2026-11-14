@@ -1,3 +1,41 @@
+# Try to un-hyphenate words hyphenated at the
+# end of a line but keeping hyphens in hyphenated compound words
+dehyphenate <- function(chr_vec) {
+  # If the de-hyphenated version is a word, then de-hyphenate
+  dehyphenatedisword <- hunspell_check(str_remove_all(chr_vec, "[:punct:]"))
+  chr_vec[dehyphenatedisword] <- str_remove_all(
+    chr_vec[dehyphenatedisword],
+    "-"
+  )
+
+  # Otherwise, if the hyphenated word isn't a word then de-hyphenate and hope for the best
+  isaword <- hunspell_check(str_remove_all(chr_vec, "[^[:alnum:]-]"))
+  ishyphenated <- str_detect(chr_vec, "-")
+  chr_vec[!isaword & ishyphenated] <- str_remove(
+    chr_vec[!isaword & ishyphenated],
+    "-"
+  )
+  return(chr_vec)
+}
+
+# Split paragraphs
+# Very preliminary code
+split_paragraphs <- function(raw_text) {
+  # Collapse the entire text into a single string to clean up line wraps
+  combined_text <- str_flatten(raw_text, collapse = "\n")
+
+  # Clean up formatting artifacts:
+  # Replace single line breaks that happen mid-sentence with spaces,
+  # but preserve double (or more) line breaks as paragraph separators.
+  # Alternatively, split directly on 2 or more newlines:
+  paragraphs <- unlist(str_split(combined_text, "\n\\s*\n"))
+
+  # 4. Post-processing: Trim whitespace and remove empty strings or page headers
+  paragraphs <- str_squish(paragraphs)
+  paragraphs <- paragraphs[paragraphs != ""]
+  return(paragraphs)
+}
+
 # Identify run-ons
 split_runon_word <- function(word) {
   if (hunspell_check(word)) {
@@ -46,6 +84,7 @@ clean_lemmas <- function(lemmas) {
       lemma = case_when(
         str_to_lower(word) == "gathering" ~ "gather",
         lemma == "wive" ~ "wife",
+        lemma == "co-wive" ~ "wife",
         lemma == "hunting" ~ "hunt",
         lemma == "hunters" ~ "hunter",
         lemma == "gathering" ~ "gather",
@@ -56,6 +95,8 @@ clean_lemmas <- function(lemmas) {
         lemma == "hunter-gather" ~ "hunter-gatherer",
         lemma == "hunting-gathering" ~ "hunter-gatherer",
         lemma == "hunting-gather" ~ "hunter-gatherer",
+        lemma == "net-hunter" ~ "hunter",
+        lemma == "net-hunt" ~ "hunt",
         lemma == "societies" ~ "society",
         lemma == "resources" ~ "resource",
         lemma == "groups" ~ "group",
@@ -78,10 +119,10 @@ clean_lemmas <- function(lemmas) {
     dplyr::filter(
       pos != "PUNCT",
       pos != "SYM",
+      pos != "NUM",
       lemma != "-", # spaCy categorizes this as a word & lemma
       !str_detect(lemma, "@card@"),
-      !str_detect(lemma, "\\d+|°|=|'|\\."),
-      !lemma %in% stop_words2$word
+      !str_detect(lemma, "\\d+|°|=|'|\\.")
     )
 }
 
@@ -112,7 +153,6 @@ plot_vectors <- function(d, fn, ggrepel = T) {
       geom_text()
   }
   ggsave(fn, p, width = 10, height = 10)
-  return(p)
 }
 
 # Text processing pipeline from Sisk
