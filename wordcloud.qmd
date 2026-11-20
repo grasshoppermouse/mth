@@ -18,6 +18,7 @@ Libraries:
 # https://github.com/msisk1/MtH_NLP/blob/main/MtH_2026.qmd
 
 library(tidyverse)
+library(tibble)
 library(tidytext)
 library(textstem)
 library(ggrepel)
@@ -25,7 +26,6 @@ library(ggwordcloud)
 library(ggraph)
 library(hunspell)
 library(text2vec)
-# library(word2vec)
 library(reticulate)
 library(udpipe)
 library(data.table)
@@ -38,13 +38,13 @@ set.seed(seed)
 source("functions.R")
 ```
 
-Stop words:
+Stop words: comparing different approaches
+* Different stop word lists
+* Parts of speech
+
+Retain words from the stop word lists that are actually informative and add a few new stop words.
 
 ```{r}
-# Prepare stop words
-# Remove a few words from the stop word list that are actually informative
-# and add a few new stop words. Removing the "onix" stop words automatically
-# removes these.
 retain <- c(
   "man",
   "men",
@@ -57,14 +57,54 @@ retain <- c(
   "working",
   "worked",
   "area",
-  "areas"
+  "areas",
+  "system",
+  "systems",
+  "case",
+  "cases",
+  "young",
+  "old",
+  "sex",
+  "pleistocene",
+  "kin",
+  "band",
+  "niche",
+  "wive",
+  "inland",
+  "economy",
+  "infanticide",
+  "gather",
+  "equilibrium",
+  "information"
 )
+
+new_stop_words <- c(
+  "pp",
+  "set",
+  "call",
+  "chapter",
+  "volume"
+)
+
+stop_words_iso <-
+  tibble(
+    word = stopwords::stopwords('en', source = "stopwords-iso"),
+    lexicon = "iso"
+  )
 
 stop_words2 <-
   stop_words |>
-  dplyr::filter(lexicon != "onix") |>
-  filter(!word %in% retain) |> # Just in case
-  add_row(word = c("pp", "set", "call"), lexicon = "Added") # add new stop words
+  dplyr::filter(lexicon != "onix")
+
+# Using stop_words_iso for now
+STOPWORDS <-
+  # stop_words2 |>
+  stop_words_iso |>
+  filter(!word %in% retain) |>
+  add_row(
+    word = new_stop_words,
+    lexicon = "Added"
+  )
 ```
 
 Load the text from the internet or a saved version, tokenize and lemmatize
@@ -90,6 +130,7 @@ mth0 <-
   mth_raw[main_text_start:references] |>
   str_replace_all("‘|’", "'") |>
   str_replace_all("“|”", '"') |>
+  str_replace_all("/", " ") |>
   str_squish() |>
   # Remove the volume title, mentioned throughout
   # the text, per discussion with Sisk
@@ -107,6 +148,7 @@ for (running_title in running_titles) {
 # at the end of lines
 mth <-
   str_flatten(mth0, " ") |>
+  str_replace_all("\\d+", "") |>
   str_squish() |>
   str_replace_all("- ", "-") |>
   str_split_1(" ") |>
@@ -128,28 +170,90 @@ mth <-
     "hunter-gatherer"
   )
 
+# Needed later for spaCy lemmatizer
+mth_length <- str_count(mth) + 10
+
 # Tokenizer and lemmatizer using a model that retains hyphenated words
 ud_model <- udpipe_load_model(file = "english-gum-ud-2.5-191206.udpipe")
 out_udpipe <- udpipe(mth, ud_model)
 ```
 
-Check if any common stop words are important and should be removed from the stopword list
+Check if any common stop words are important and should be removed from the stopword list. There is a subtle complication: some stop words, like "better", are lemmatized into lemmas, like "good", that are not stop words.
 
 ```{r}
+# lemmas in stop words
 sort(
-  table(out_udpipe$lemma[out_udpipe$lemma %in% stop_words2$word]),
+  table(out_udpipe$lemma[str_to_lower(out_udpipe$lemma) %in% STOPWORDS$word]),
+  decreasing = T
+)[1:150]
+
+# tokens (words) in stop words
+sort(
+  table(out_udpipe$token[str_to_lower(out_udpipe$token) %in% STOPWORDS$word]),
   decreasing = T
 )[1:150]
 ```
 
-Remove stopwords
+Compare stops words generated from udpip "position of speech" (pos) to the STOPWORDS list. The possible advantage of using position-of-speech is that e.g., homonyms, like good (good boy vs. an expensive good) should be treated as stop words in some cases but not others.
+
+However, some words, like Pleistocene, are incorrectly tagged, e.g., as a NUM, and then they are incorrectly removed as a stop word. In other cases, words that should be removed as stop words don't belong to any of these parts of speech.
+
+```{r}
+pos_stopwords <- c(
+  "DET", # Deteriminers. e.g., the, this, a
+  "PRON", # Pronouns
+  "ADP", # Prepositions (in, of, to)
+  "CCONJ", # conjunctions (and, but, because)
+  "SCONJ",
+  "AUX", # Auxiliary verbs (is, have, will)
+  "PART", # particles ('s, not, to)
+  "PUNCT", # Punctuation
+  "SYM", # Symbols
+  "NUM" # Numbers
+)
+
+stopwords_udpipe <-
+  out_udpipe |>
+  dplyr::filter(upos %in% pos_stopwords) |>
+  mutate(lemma = str_to_lower(lemma))
+```
+
+position-of-speech potential stop words missed by list-based stop words
+
+```{r}
+missed1 <-
+  stopwords_udpipe |>
+  dplyr::filter(
+    lemma %in% setdiff(lemma, STOPWORDS$word)
+  )
+sort(table(missed1$lemma), decreasing = T)[1:150]
+```
+
+List stop words missed by position-of-speech potential stop words
+
+```{r}
+missed2 <-
+  out_udpipe |>
+  dplyr::filter(
+    str_to_lower(lemma) %in% setdiff(STOPWORDS$word, stopwords_udpipe$lemma)
+  )
+sort(table(missed2$lemma), decreasing = T)[1:150]
+```
+
+Conclusion: too many stop words missed by position-of-speech:
+
+Remove stopwords using standard list (STOPWORDS), but matching with the original word, not the lemma, to avoid problem of stop words lemmatized into non stop words.
 
 ```{r}
 lemmas_udpipe0 <-
   out_udpipe |>
   rename(word = token, pos = upos) |>
-  mutate(lemma = str_to_lower(lemma)) |>
-  anti_join(stop_words2, by = join_by(lemma == word))
+  mutate(
+    word = str_to_lower(word),
+    word = str_remove_all(word, "[^[:alnum:]-]"), #
+    lemma = str_to_lower(lemma)
+  ) |>
+  anti_join(STOPWORDS, by = join_by(word == word))
 ```
 
 Top hyphenated words
@@ -174,12 +278,6 @@ lemmas_udpipe <-
   )
 ```
 
-```{r}
-# Cleaned up text
-write(mth, "mth_clean.txt")
-mth_length <- str_count(mth) + 10
-```
-
 Lemmas from spaCy using the cleaned up text `mth`
 
 ```{python}
@@ -195,15 +293,12 @@ doc = nlp(r.mth)
 doc2 <- iterate(py$doc)
 lemmas_spacy <-
   tibble(
-    word = map_chr(doc2, \(token) token$text),
+    word = map_chr(doc2, \(token) str_to_lower(token$text)),
     lemma = map_chr(doc2, \(token) str_to_lower(token$lemma_)),
     pos = map_chr(doc2, \(token) token$pos_)
   ) |>
-  anti_join(stop_words2, by = join_by(lemma == word)) |>
+  anti_join(STOPWORDS, by = join_by(word == word)) |>
   clean_lemmas()
-
-# Reconstruct the full text as a single string
-mth_spacy <- str_flatten(lemmas_spacy$lemma, collapse = " ")
 ```
 
 Count lemmas
@@ -226,7 +321,7 @@ mth_words_udpipe <-
 lemmas_sisk <-
   sisk_lemmas(mth0) |>
   rename(lemma = word, word = word_orig) |>
-  anti_join(stop_words2, by = join_by(lemma == word))
+  anti_join(STOPWORDS, by = join_by(word == word))
 
 mth_words_sisk <-
   lemmas_sisk |>
@@ -267,7 +362,7 @@ Compare frequencies of 200 most frequent words in spaCy and udpipe. Large discre
 ```{r}
 d <-
   mth_words_combined |>
-  dplyr::filter(!is.na(sd)) |>
+  dplyr::filter(!is.na(sd), cv > 0.25) |>
   arrange(desc(n_udpipe))
 
 ggplot(d[1:200, ], aes(n_spacy, n_udpipe, label = lemma)) +
@@ -411,10 +506,10 @@ Plot
 ```{r}
 mth200 <- as_tibble(wikivec200, rownames = "lemma")
 mth200$n <- mth200spacy$n
-mth200$e1 <- py$embedding1[, 1]
-mth200$e2 <- py$embedding1[, 2]
+mth200$x <- py$embedding1[, 1]
+mth200$y <- py$embedding1[, 2]
 fn <- "wordcloud.wiki.svg"
-plot_vectors(mth200, fn)
+plot_vectors(mth200, fn, colorize = F)
 ```
 
 ![](`{r} fn`)
@@ -470,10 +565,18 @@ Plot
 ```{r}
 mth200 <- as_tibble(text2vec200, rownames = "lemma")
 mth200$n <- mth200udpipe$n
-mth200$e1 <- py$embedding2[, 1]
-mth200$e2 <- py$embedding2[, 2]
+mth200$x <- py$embedding2[, 1]
+mth200$y <- py$embedding2[, 2]
 fn <- "wordcloud.t2v.svg"
-plot_vectors(mth200, fn)
+plot_vectors(mth200, fn, colorize = F)
 ```
 
 ![](`{r} fn`)
+
+Mapping the above semantic map into an ellipse to resemble a standard word cloud:
+
+```{r}
+source("pack_elliptical_cloud.R")
+```
+
+![](wordcloud.ellipse.svg)
