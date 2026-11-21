@@ -26,10 +26,10 @@ Then render the quarto file `wordcloud.qmd` (first install any missing packages)
 * Running the `R` code in RStudio will cause a crash. Use [Positron](https://positron.posit.co) or a terminal.
 * The text of *Man the Hunter* was obtained from the [Internet Archive](https://archive.org/details/ManTheHunter), and will be downloaded automatically by the `R` script.
 * The text contains misc errors, presumably due to errors in converting the original to text.
-* Misc text cleaning included an attempt to "de-hyphenate" words hyphenated at the ends of lines, e.g., "compara-tive".
-* Stop words removed using the `tidytext` package, but without the onix stop words.
-* Some stop words in the `tidytext` package, specifically "man", "men", "group", "groups", "area", and "areas", were *not* removed.
-* Words were [lemmatized](https://en.wikipedia.org/wiki/Lemmatization) using the [spaCy](https://spacy.io) python package and [udpipe](https://cran.r-project.org/web/packages/udpipe/index.html) `R` package.
+* Misc text cleaning included an attempt to "de-hyphenate" words hyphenated at the ends of lines, e.g., "compara-tive", as well as several manual fixes.
+* Stop words removed using the `tidytext` package, but without the onix stop words, and with the larger stopwords-iso list from the `stopwords` package. See code for details.
+* Some stop words were *not* removed (see code).
+* Words were [lemmatized](https://en.wikipedia.org/wiki/Lemmatization) using the [spaCy](https://spacy.io) python package and tokenized and lemmatized with the [udpipe](https://cran.r-project.org/web/packages/udpipe/index.html) `R` package.
 * Word embeddings were computed using the GloVe algorithm from the [`text2vec`](https://text2vec.org/glove.html) package.
 * Reduction of the high dimensional word embedding space to 2D for visualization was done with [PaCMAP](https://github.com/YingfanWang/PaCMAP).
 * The wordcloud and semantic maps were plotted using the `ggwordcloud` and `ggrepel` packages.
