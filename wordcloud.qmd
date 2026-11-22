@@ -23,6 +23,7 @@ library(tidytext)
 library(textstem)
 library(ggrepel)
 library(ggwordcloud)
+library(igraph)
 library(ggraph)
 library(hunspell)
 library(text2vec)
@@ -38,9 +39,9 @@ set.seed(seed)
 source("functions.R")
 ```
 
-Stop words: comparing different approaches
-* Different stop word lists
-* Parts of speech
+Stop words: comparing different approaches:
+  * Different stop word lists
+  * Parts of speech
 
 Retain words from the stop word lists that are actually informative and add a few new stop words.
 
@@ -145,7 +146,7 @@ for (running_title in running_titles) {
 }
 
 # Try to fix words hyphenated
-# at the end of lines
+# at the end of lines. See functions.R
 mth <-
   str_flatten(mth0, " ") |>
   str_replace_all("\\d+", "") |>
@@ -546,6 +547,8 @@ text2vec200 <- word_vectors[mth200udpipe$lemma, ]
 Reduce dimensionality
 
 ```{python}
+# import pacmap
+
 reducer2 = pacmap.PaCMAP(
     n_components=2,  # Coordinates for 2D plotting
     distance="angular",
@@ -580,3 +583,11 @@ source("pack_elliptical_cloud.R")
 ```
 
 ![](wordcloud.ellipse.svg)
+
+Hierarchical clusters
+
+```{r}
+source("clusters.R")
+```
+
+![](hclust.svg)

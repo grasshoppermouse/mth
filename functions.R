@@ -36,7 +36,48 @@ split_paragraphs <- function(raw_text) {
   return(paragraphs)
 }
 
+
+# Run-on functions have too many false positives
 # Identify run-ons
+id_runon_word <- function(word) {
+  if (hunspell_check(word)) {
+    return(F)
+  }
+
+  word <- tolower(trimws(word))
+  n <- nchar(word)
+
+  # A word must be at least 2 characters to split into two parts
+  if (n < 2) {
+    return(F)
+  }
+
+  # Generate all possible split positions
+  splits <- seq_len(n - 1)
+
+  # Create pairs of prefixes and suffixes
+  prefixes <- substring(word, 1, splits)
+  suffixes <- substring(word, splits + 1, n)
+
+  # Check if both parts are valid English words
+  # (hunspell_check returns TRUE for valid dictionary words)
+  valid_prefix <- hunspell_check(prefixes)
+  valid_suffix <- hunspell_check(suffixes)
+
+  # Find indices where BOTH parts are valid words
+  valid_indices <- which(valid_prefix & valid_suffix)
+
+  if (length(valid_indices) > 0) {
+    # Combine the valid parts with a space
+    # (Returns all valid combinations if there are multiple matches)
+    return(T)
+  } else {
+    # Return original if no valid split is found
+    return(F)
+  }
+}
+
+# Fix run-ons
 split_runon_word <- function(word) {
   if (hunspell_check(word)) {
     return(word)
@@ -77,12 +118,14 @@ split_runon_word <- function(word) {
 
 # Function to clean lemmas
 # Manual fixes based on discrepancies among lemmatizers
+# and some odd position-of-speech annotations
 clean_lemmas <- function(lemmas) {
   lemmas |>
     mutate(
       lemma = str_to_lower(lemma),
       lemma = case_when(
         str_to_lower(word) == "gathering" ~ "gather",
+        lemma == "men" ~ "man",
         lemma == "wive" ~ "wife",
         lemma == "co-wive" ~ "wife",
         lemma == "hunting" ~ "hunt",
@@ -106,6 +149,7 @@ clean_lemmas <- function(lemmas) {
         lemma == "eskimos" ~ "eskimo",
         lemma == "specie" ~ "species",
         lemma == "bushmen" ~ "bushman",
+        lemma == "aboriginal" ~ "aborigine",
         lemma == "indians" ~ "indian",
         lemma == "neighbors" ~ "neighbor",
         lemma == "neighboring" ~ "neighbor",
@@ -113,8 +157,18 @@ clean_lemmas <- function(lemmas) {
         lemma == "eating" ~ "eat",
         lemma == "numb" ~ "number",
         lemma == "fishing" ~ "fish", # match Sisk
+        lemma == "foodstuff" ~ "food",
+        lemma == "assum" ~ "assume",
+        lemma == "offspr" ~ "offspring",
         .default = lemma
       ),
+      pos = case_when(
+        lemma == "pleistocene" ~ "NOUN",
+        lemma == "sex" ~ "NOUN",
+        lemma == "man" ~ "NOUN",
+        lemma == "moiety" ~ "NOUN",
+        .default = pos
+      )
     ) |>
     dplyr::filter(
       pos != "PUNCT",
@@ -127,11 +181,18 @@ clean_lemmas <- function(lemmas) {
 }
 
 # Function to plot word vectors
-plot_vectors <- function(d, fn, ggrepel = T) {
-  p <-
-    ggplot(d, aes(e1, e2, label = lemma, size = n)) +
+plot_vectors <- function(d, fn, ggrepel = T, colorize = T) {
+  if (colorize) {
+    d <- assign_cvd_safe_2d(d)
+    p <-
+      ggplot(d, aes(x, y, label = lemma, size = n, color = color)) +
+      guides(colour = guide_none())
+  } else {
+    p <- ggplot(d, aes(x, y, label = lemma, size = n))
+  }
+  p <- p +
     geom_point(alpha = 0.1) +
-    scale_size_area(max_size = 10, transform = 'identity') +
+    scale_size_area(max_size = 10, transform = 'sqrt') +
     coord_fixed() +
     theme_void()
 
@@ -152,7 +213,7 @@ plot_vectors <- function(d, fn, ggrepel = T) {
       p +
       geom_text()
   }
-  ggsave(fn, p, width = 10, height = 10)
+  ggsave(fn, p, width = 14, height = 14)
 }
 
 # Text processing pipeline from Sisk
@@ -181,4 +242,29 @@ sisk_lemmas <- function(mth_unmodified) {
     filter(!str_detect(word, "[0-9]")) # remove numeric tokens after lemmatizing to avoid e.g."tenth" becoming "10"
 
   return(bag_of_words)
+}
+
+# Run BEFORE pack_elliptical_cloud() using original (x, y)
+assign_cvd_safe_2d <- function(df) {
+  nx <- as.numeric(scale(df$x))
+  ny <- as.numeric(scale(df$y))
+
+  # Map vertical axis (ny) to a CVD-safe perceptually uniform palette (Cividis or Plasma)
+  # Capping end = 0.85 prevents pale yellow text from disappearing on white
+  t_y <- pmin(pmax((ny + 2) / 4, 0), 1)
+  base_cols <- viridisLite::plasma(256, begin = 0.05, end = 0.82)
+  idx <- pmax(1, round(t_y * 255) + 1)
+
+  # Modulate brightness slightly along the horizontal axis (nx) to separate left vs. right
+  t_x <- pmin(pmax((nx + 2) / 4, 0), 1)
+  rgb_mat <- grDevices::col2rgb(base_cols[idx]) / 255
+  # Gently darken left side (0.72x) vs right side (1.0x) while keeping contrast high
+  shade <- 0.72 + 0.28 * t_x
+
+  df$color <- grDevices::rgb(
+    rgb_mat[1, ] * shade,
+    rgb_mat[2, ] * shade,
+    rgb_mat[3, ] * shade
+  )
+  df
 }
